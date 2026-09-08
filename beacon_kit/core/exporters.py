@@ -27,6 +27,10 @@ def build_span_exporter(config: "TelemetryConfig") -> SpanExporter:
         from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
         return OTLPSpanExporter(endpoint=config.otel_endpoint)
 
+    if config.exporter_type == "pretty":
+        from beacon_kit.core.pretty_exporter import PrettySpanExporter
+        return PrettySpanExporter()
+
     # Default: console (dev)
     return ConsoleSpanExporter()
 
@@ -45,4 +49,32 @@ def build_metric_exporter(config: "TelemetryConfig") -> MetricExporter:
         from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
         return OTLPMetricExporter(endpoint=config.otel_endpoint)
 
+    if config.exporter_type == "pretty":
+        from beacon_kit.core.pretty_exporter import PrettyMetricExporter
+        return PrettyMetricExporter()
+
     return ConsoleMetricExporter()
+
+
+def build_log_exporter(config: "TelemetryConfig"):
+    """Build an OTEL log record exporter matching the configured backend."""
+    if config.exporter_type == "pretty":
+        from beacon_kit.core.pretty_exporter import PrettyLogExporter
+        return PrettyLogExporter()
+
+    if config.exporter_type == "otel_collector":
+        try:
+            from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
+            return OTLPLogExporter(endpoint=config.otel_endpoint)
+        except ImportError as exc:
+            raise ImportError("Install otlp extras: pip install opentelemetry-exporter-otlp-proto-grpc") from exc
+
+    if config.exporter_type == "azure_monitor":
+        try:
+            from azure.monitor.opentelemetry.exporter import AzureMonitorLogExporter
+            return AzureMonitorLogExporter(connection_string=config.azure_connection_string)
+        except ImportError as exc:
+            raise ImportError("Install azure extras: pip install beacon_kit[azure]") from exc
+
+    from opentelemetry.sdk._logs.export import ConsoleLogExporter
+    return ConsoleLogExporter()

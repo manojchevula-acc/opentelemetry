@@ -45,7 +45,7 @@ app = FastAPI(title="Simple Project", lifespan=lifespan)
 
 # FastAPIInstrumentor MUST be applied before TelemetryMiddleware so it creates
 # the root span that TelemetryMiddleware will enrich.
-FastAPIInstrumentor.instrument_app(app)
+FastAPIInstrumentor.instrument_app(app, excluded_urls="health,telemetry/recent")
 app.add_middleware(
     TelemetryMiddleware,
     run_id_header="X-Run-ID",
@@ -108,6 +108,27 @@ async def query(request: PricingRequest) -> PricingResponse:
         run_id=state["run_id"],
         compliance_emitted=state.get("compliance_emitted", False),
     )
+
+
+@app.get("/telemetry/recent")
+async def telemetry_recent() -> dict:
+    """Return the most recent spans, metrics, and logs from the in-process buffer.
+
+    Only populated when EXPORTER_TYPE=pretty.  Returns empty lists otherwise.
+    """
+    try:
+        from beacon_kit.core.pretty_exporter import (
+            get_buffered_traces,
+            get_buffered_metrics,
+            get_buffered_logs,
+        )
+        return {
+            "traces": get_buffered_traces(),
+            "metrics": get_buffered_metrics(),
+            "logs": get_buffered_logs(),
+        }
+    except ImportError:
+        return {"traces": [], "metrics": [], "logs": []}
 
 
 if __name__ == "__main__":

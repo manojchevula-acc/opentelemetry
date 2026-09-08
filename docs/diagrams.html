@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>workspace — Architecture Diagrams</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #0f1117;
+      --surface:      #1a1d27;
+      --surface2:     #22263a;
+      --border:       #2d3148;
+      --text:         #dde1f5;
+      --muted:        #6b7196;
+      --accent:       #6c8ef5;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      min-height: 100vh;
+    }
+
+    header {
+      padding: 20px 32px 16px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    header h1  { font-size: 20px; font-weight: 700; color: #fff; }
+    header p   { font-size: 13px; color: var(--muted); margin-top: 3px; }
+    header code { background: var(--surface2); padding: 1px 5px; border-radius: 3px; font-size: 12px; color: #a8b6ff; }
+
+    nav.tabs {
+      display: flex;
+      gap: 0;
+      padding: 0 24px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+    }
+    .tab-btn {
+      padding: 10px 20px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--muted);
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: color .15s, border-color .15s;
+    }
+    .tab-btn:hover  { color: var(--text); }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    .tab-panel          { display: none; padding: 28px 32px; }
+    .tab-panel.active   { display: block; }
+
+    .tab-panel h2  { font-size: 17px; font-weight: 600; margin-bottom: 5px; }
+    .tab-panel .desc {
+      font-size: 13px; color: var(--muted); margin-bottom: 22px; line-height: 1.5;
+    }
+    .tab-panel .desc code {
+      background: var(--surface2); padding: 1px 5px; border-radius: 3px;
+      font-size: 12px; color: #a8b6ff;
+    }
+
+    .diagram-wrap {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 28px 20px;
+      overflow: auto;
+    }
+    .diagram-wrap .mermaid { display: flex; justify-content: center; }
+    .diagram-wrap svg { max-width: 100%; }
+
+    /* D3 call graph */
+    #callgraph-svg {
+      width: 100%;
+      height: 600px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      display: block;
+      cursor: grab;
+    }
+    #callgraph-svg:active { cursor: grabbing; }
+
+    .cg-legend {
+      margin-top: 14px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 20px;
+    }
+    .cg-legend-item {
+      display: flex; align-items: center; gap: 7px;
+      font-size: 12px; color: var(--muted);
+    }
+    .cg-dot {
+      width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0;
+    }
+    .cg-hint {
+      font-size: 11px; color: var(--muted); margin-top: 8px;
+    }
+
+    /* tooltip */
+    #d3tip {
+      position: fixed;
+      background: #252a3d;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      pointer-events: none;
+      display: none;
+      z-index: 999;
+      max-width: 280px;
+      line-height: 1.55;
+    }
+    #d3tip strong { color: #fff; }
+    #d3tip code   { color: #a8b6ff; font-size: 11px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>workspace — Architecture Diagrams</h1>
+  <p><code>beacon_kit</code> &nbsp;OTel sidecar library &nbsp;·&nbsp; <code>simple_project</code> &nbsp;FastAPI demo application</p>
+</header>
+
+<nav class="tabs">
+  <button class="tab-btn" data-tab="arch">Architecture</button>
+  <button class="tab-btn" data-tab="deps">Module Dependencies</button>
+  <button class="tab-btn" data-tab="reqflow">Request Flow</button>
+  <button class="tab-btn" data-tab="callgraph">Call Graph</button>
+  <button class="tab-btn" data-tab="pipeline">Pipeline Flow</button>
+  <button class="tab-btn" data-tab="compliance">Compliance Chain</button>
+</nav>
+
+<main>
+
+<!-- ─── 1. Architecture Overview ─────────────────────────────────────── -->
+<div id="tab-arch" class="tab-panel">
+  <h2>Architecture Overview</h2>
+  <p class="desc">
+    High-level view of the two packages, their internal modules, and the
+    pluggable telemetry backend switched via the <code>EXPORTER_TYPE</code> env var.
+  </p>
+  <div class="diagram-wrap">
+    <pre class="mermaid">%%{init:{'theme':'dark','themeVariables':{'fontSize':'14px'}}}%%
+flowchart TD
+    subgraph SP["simple_project — FastAPI Application"]
+        MAIN["main.py\nFastAPI · /health · /query · lifespan"]
+        CONF["config.py — AppConfig extends TelemetryConfig"]
+        AGENT["agents/pricing_agent.py\nrun_pricing_pipeline + 4 traced nodes"]
+        TOOLS["tools/data_tools.py\n3 traced tool functions"]
+    end
+
+    subgraph BK["beacon_kit — OTel Sidecar Library"]
+        subgraph CORE["core/"]
+            PROV["provider.py\nsetup_telemetry() → TelemetryHandle"]
+            EXP["exporters.py\nbuild_span_exporter / build_metric_exporter"]
+            CFG["config.py — TelemetryConfig"]
+        end
+        subgraph DEC["decorators/"]
+            TR["trace.py — @traced · @traced_node"]
+            TL["tool.py — @traced_tool"]
+            MT["metrics.py — @track_latency · @count_calls"]
+        end
+        subgraph PROP["propagation/"]
+            CTX["context.py — get_current_trace_id"]
+            BAG["baggage.py — BaggageSpanProcessor"]
+        end
+        subgraph COMP["compliance/"]
+            EVTS["events.py — emit_compliance_event"]
+            CHAIN["chain.py — chain_hash · sign · verify"]
+        end
+        MW["middleware/fastapi.py — TelemetryMiddleware"]
+        CB["circuit_breaker/breaker.py — TelemetryCircuitBreaker"]
+        subgraph UTIL["utils/"]
+            HASH["hashing.py — hash_inputs · summarize_output"]
+            SAN["sanitizer.py — scrub_pii"]
+        end
+    end
+
+    subgraph BACK["Telemetry Backend  (EXPORTER_TYPE)"]
+        CON["Console"]
+        OTLP["OTel Collector gRPC"]
+        AZ["Azure Monitor App Insights"]
+    end
+
+    MAIN --> CONF
+    MAIN --> AGENT
+    MAIN --> MW
+    CONF --> CFG
+    AGENT --> TR
+    AGENT --> EVTS
+    AGENT --> HASH
+    AGENT --> CTX
+    AGENT --> TOOLS
+    TOOLS --> TL
+    TOOLS --> CB
+    PROV --> EXP
+    PROV --> BAG
+    EVTS --> CHAIN
+    EVTS --> CTX
+    EVTS --> HASH
+    TL --> HASH
+    TL --> SAN
+    EXP --> CON
+    EXP --> OTLP
+    EXP --> AZ
+    </pre>
+  </div>
+</div>
+
+<!-- ─── 2. Module Dependencies ────────────────────────────────────────── -->
+<div id="tab-deps" class="tab-panel">
+  <h2>Module Dependency Graph</h2>
+  <p class="desc">
+    Import relationships between every Python module in the project.
+    Edges point from the importing module to the imported module.
+  </p>
+  <div class="diagram-wrap">
+    <pre class="mermaid">%%{init:{'theme':'dark'}}%%
+graph LR
+    subgraph SP["simple_project"]
+        SM["main.py"]
+        SC["config.py"]
+        SA["agents/pricing_agent.py"]
+        ST["tools/data_tools.py"]
+    end
+
+    subgraph BK["beacon_kit"]
+        BKAPI["__init__.py"]
+        BKCFG["core/config.py"]
+        BKPROV["core/provider.py"]
+        BKEXP["core/exporters.py"]
+        BKTR["decorators/trace.py"]
+        BKTL["decorators/tool.py"]
+        BKMT["decorators/metrics.py"]
+        BKMW["middleware/fastapi.py"]
+        BKCTX["propagation/context.py"]
+        BKBAG["propagation/baggage.py"]
+        BKEVTS["compliance/events.py"]
+        BKCHAIN["compliance/chain.py"]
+        BKCB["circuit_breaker/breaker.py"]
+        BKHASH["utils/hashing.py"]
+        BKSAN["utils/sanitizer.py"]
+    end
+
+    SM --> SC
+    SM --> SA
+    SM --> BKAPI
+    SM --> BKMW
+
+    SC --> BKCFG
+
+    SA --> BKAPI
+    SA --> BKEVTS
+    SA --> BKHASH
+    SA --> BKCTX
+    SA --> ST
+
+    ST --> BKAPI
+    ST --> BKCB
+
+    BKAPI --> BKCFG
+    BKAPI --> BKPROV
+    BKAPI --> BKTR
+    BKAPI --> BKTL
+    BKAPI --> BKMT
+    BKAPI --> BKCTX
+    BKAPI --> BKBAG
+    BKAPI --> BKHASH
+    BKAPI --> BKSAN
+
+    BKPROV --> BKEXP
+    BKPROV --> BKBAG
+
+    BKEVTS --> BKCHAIN
+    BKEVTS --> BKCTX
+    BKEVTS --> BKHASH
+
+    BKTL --> BKHASH
+    BKTL --> BKSAN
+    </pre>
+  </div>
+</div>
+
+<!-- ─── 3. HTTP Request Flow ──────────────────────────────────────────── -->
+<div id="tab-reqflow" class="tab-panel">
+  <h2>HTTP Request Flow</h2>
+  <p class="desc">
+    End-to-end sequence for a <code>POST /query</code> request — from
+    middleware span enrichment through the four pipeline nodes, three parallel
+    tool calls, and the final compliance log write.
+  </p>
+  <div class="diagram-wrap">
+    <pre class="mermaid">%%{init:{'theme':'dark'}}%%
+sequenceDiagram
+    participant C  as Client
+    participant FI as FastAPI + OTel Instrumentation
+    participant MW as TelemetryMiddleware
+    participant EP as query() endpoint
+    participant PP as run_pricing_pipeline
+    participant VQ as validate_query
+    participant FD as fetch_deal_data
+    participant CP as compute_pricing
+    participant CR as emit_compliance_record
+    participant CE as emit_compliance_event
+    participant FS as compliance_events.jsonl
+
+    C->>FI: POST /query  {deal_id, query_category}
+    FI->>FI: Create root SERVER span (W3C traceparent header)
+    FI->>MW: dispatch(request)
+    MW->>MW: extract / generate run_id (UUID)
+    MW->>MW: enrich active span: service.run_id, http.route, service.name, pod
+    MW->>EP: call_next(request)
+    EP->>EP: set_baggage_on_current_context(query.category, business_unit, ...)
+    EP->>PP: run_pricing_pipeline(deal_id, query_category, config)
+    PP->>PP: init_agent(config)  —  set module-level _config
+    PP->>PP: get_current_trace_id()  →  state["run_id"]
+    PP->>VQ: validate_query(state)
+    note over VQ: INTERNAL span — checks required keys present
+    VQ-->>PP: state  {valid: true}
+    PP->>FD: fetch_deal_data(state)
+    note over FD: INTERNAL span — asyncio.gather (parallel)
+    par parallel tool calls
+        FD->>FD: rwa_engine_lookup(deal_id)   [CLIENT span + CircuitBreaker]
+        FD->>FD: deal_db_lookup(deal_id)      [CLIENT span]
+        FD->>FD: market_data_fetch(asset_class) [CLIENT span]
+    end
+    FD-->>PP: state enriched with rwa_usd, notional, rate
+    PP->>CP: compute_pricing(state)
+    note over CP: INTERNAL span — rwa_usd x rate / notional
+    CP-->>PP: state  {indicative_price}
+    PP->>CR: emit_compliance_record(state)
+    note over CR: INTERNAL span
+    CR->>CE: emit_compliance_event(event, config)
+    CE->>CE: compute_chain_hash  [acquire _chain_lock]
+    CE->>CE: sign_event  [HMAC-SHA256, under lock]
+    CE->>FS: _write_to_store  →  append JSON line
+    CE-->>CR: ComplianceEvent (signed + chained)
+    CR-->>PP: state  {compliance_emitted: true}
+    PP-->>EP: {deal_id, indicative_price, run_id, compliance_emitted}
+    EP->>EP: detach baggage context token
+    EP-->>MW: PricingResponse
+    MW->>MW: response.headers["x-run-id"] = run_id
+    MW-->>C: 200 OK  —  PricingResponse + x-run-id header
+    </pre>
+  </div>
+</div>
+
+<!-- ─── 4. Call Graph (D3) ────────────────────────────────────────────── -->
+<div id="tab-callgraph" class="tab-panel">
+  <h2>Function Call Graph</h2>
+  <p class="desc">
+    Interactive force-directed graph of all named functions and their runtime
+    call relationships. Colour = layer. &nbsp;Drag nodes · scroll to zoom ·
+    hover for file path.
+  </p>
+  <svg id="callgraph-svg"></svg>
+  <div class="cg-legend" id="cg-legend"></div>
+  <p class="cg-hint">Tip: drag nodes to rearrange &nbsp;·&nbsp; scroll / pinch to zoom &nbsp;·&nbsp; hover a node for the source file</p>
+</div>
+
+<!-- ─── 5. Pipeline Flow ──────────────────────────────────────────────── -->
+<div id="tab-pipeline" class="tab-panel">
+  <h2>Pricing Pipeline Flow</h2>
+  <p class="desc">
+    The four <code>@traced_node</code> steps wired sequentially inside
+    <code>run_pricing_pipeline()</code>, with the <code>asyncio.gather</code>
+    parallel fan-out shown inside <code>fetch_deal_data</code>.
+  </p>
+  <div class="diagram-wrap">
+    <pre class="mermaid">%%{init:{'theme':'dark','themeVariables':{'fontSize':'14px'}}}%%
+flowchart LR
+    REQ([POST /query]) --> INIT
+
+    subgraph PP["run_pricing_pipeline()"]
+        INIT["init_agent\nget_current_trace_id\nbuild state dict"]
+        VQ["validate_query\n@traced_node  INTERNAL span"]
+        FD["fetch_deal_data\n@traced_node  INTERNAL span"]
+        CP["compute_pricing\n@traced_node  INTERNAL span"]
+        CR["emit_compliance_record\n@traced_node  INTERNAL span"]
+
+        INIT --> VQ
+        VQ --> FD
+        FD --> CP
+        CP --> CR
+
+        subgraph GATHER["asyncio.gather  —  parallel"]
+            RWA["rwa_engine_lookup\n@traced_tool  CLIENT span\nTelemetryCircuitBreaker"]
+            DDB["deal_db_lookup\n@traced_tool  CLIENT span"]
+            MDF["market_data_fetch\n@traced_tool  CLIENT span"]
+        end
+
+        FD --> GATHER
+    end
+
+    CR --> RES([PricingResponse])
+    CR --> JSONL[(compliance_events.jsonl)]
+    </pre>
+  </div>
+</div>
+
+<!-- ─── 6. Compliance Chain ───────────────────────────────────────────── -->
+<div id="tab-compliance" class="tab-panel">
+  <h2>Compliance Chain Flow</h2>
+  <p class="desc">
+    How each <code>ComplianceEvent</code> is SHA-256 chain-hashed against the
+    previous event and HMAC-SHA256 signed before being appended to the
+    append-only JSONL audit log (thread-safe under <code>_chain_lock</code>).
+  </p>
+  <div class="diagram-wrap">
+    <pre class="mermaid">%%{init:{'theme':'dark'}}%%
+sequenceDiagram
+    participant ER as emit_compliance_record
+    participant CE as emit_compliance_event
+    participant LK as _chain_lock
+    participant CH as compute_chain_hash
+    participant SG as sign_event
+    participant WS as _write_to_store
+    participant FS as compliance_events.jsonl
+
+    ER->>ER: hash_inputs({deal_id, price})  →  payload_hash
+    ER->>ER: get_current_trace_id()  ·  get_current_span_id()
+    ER->>ER: ComplianceEvent(type, run_id, actor, payload_hash, trace_id, span_id)
+    ER->>CE: emit_compliance_event(event, config)
+    CE->>LK: acquire _chain_lock
+    CE->>CE: build signable dict  (exclude chain_hash + signature fields)
+    CE->>CH: compute_chain_hash(signable, _previous_hash)
+    note over CH: SHA-256(_previous_hash + json(signable))
+    CH-->>CE: chain_hash  (64 hex chars)
+    CE->>SG: sign_event(signable, hmac_key)
+    note over SG: HMAC-SHA256(canonical JSON bytes)
+    SG-->>CE: signature  (64 hex chars)
+    CE->>CE: event.chain_hash = chain_hash
+    CE->>CE: event.signature  = signature
+    CE->>CE: _previous_hash   = chain_hash  [update module global]
+    CE->>LK: release _chain_lock
+    CE->>WS: _write_to_store(event_dict, store_path)
+    WS->>FS: open(append)  ·  json.dumps line  ·  flush
+    CE-->>ER: ComplianceEvent  (signed + chained)
+    </pre>
+  </div>
+</div>
+
+</main>
+
+<!-- D3 tooltip -->
+<div id="d3tip"></div>
+
+<script>
+// ── Mermaid init ────────────────────────────────────────────────────────────
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'dark',
+  securityLevel: 'loose',
+  flowchart: { curve: 'basis', useMaxWidth: true },
+  sequence: { useMaxWidth: true },
+});
+
+// ── Tab switching ───────────────────────────────────────────────────────────
+const rendered = new Set();
+
+function showTab(tabId) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+
+  const panel = document.getElementById('tab-' + tabId);
+  panel.classList.add('active');
+  const btn = document.querySelector('[data-tab="' + tabId + '"]');
+  if (btn) btn.classList.add('active');
+
+  if (!rendered.has(tabId)) {
+    rendered.add(tabId);
+    if (tabId === 'callgraph') {
+      requestAnimationFrame(initCallGraph);
+    } else {
+      const mNodes = Array.from(panel.querySelectorAll('.mermaid'));
+      if (mNodes.length) mermaid.run({ nodes: mNodes });
+    }
+  }
+}
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => showTab(btn.dataset.tab));
+});
+
+showTab('arch');
+
+// ── D3 Call Graph ───────────────────────────────────────────────────────────
+const GROUPS = [
+  { label: 'simple_project — application layer',            color: '#4a90e2' },
+  { label: 'beacon_kit — decorators / middleware',          color: '#2ecc71' },
+  { label: 'beacon_kit — core (setup / exporters)',         color: '#e67e22' },
+  { label: 'beacon_kit — compliance / crypto',              color: '#9b59b6' },
+  { label: 'beacon_kit — utils (hashing / sanitizer)',      color: '#e74c3c' },
+  { label: 'beacon_kit — propagation / context',            color: '#1abc9c' },
+  { label: 'beacon_kit — circuit breaker',                  color: '#f39c12' },
+];
+
+const CG_NODES = [
+  { id: 'query',                          label: 'query()',                         group: 0, file: 'simple_project/main.py' },
+  { id: 'health',                         label: 'health()',                        group: 0, file: 'simple_project/main.py' },
+  { id: 'run_pricing_pipeline',           label: 'run_pricing_pipeline()',          group: 0, file: 'agents/pricing_agent.py' },
+  { id: 'init_agent',                     label: 'init_agent()',                    group: 0, file: 'agents/pricing_agent.py' },
+  { id: 'validate_query',                 label: 'validate_query()',                group: 0, file: 'agents/pricing_agent.py' },
+  { id: 'fetch_deal_data',                label: 'fetch_deal_data()',               group: 0, file: 'agents/pricing_agent.py' },
+  { id: 'compute_pricing',                label: 'compute_pricing()',               group: 0, file: 'agents/pricing_agent.py' },
+  { id: 'emit_compliance_record',         label: 'emit_compliance_record()',        group: 0, file: 'agents/pricing_agent.py' },
+  { id: 'rwa_engine_lookup',              label: 'rwa_engine_lookup()',             group: 0, file: 'tools/data_tools.py' },
+  { id: 'deal_db_lookup',                 label: 'deal_db_lookup()',                group: 0, file: 'tools/data_tools.py' },
+  { id: 'market_data_fetch',              label: 'market_data_fetch()',             group: 0, file: 'tools/data_tools.py' },
+  { id: 'TelemetryMiddleware_dispatch',   label: 'TelemetryMiddleware.dispatch()',  group: 1, file: 'beacon_kit/middleware/fastapi.py' },
+  { id: 'traced_node_wrapper',            label: '@traced_node wrapper',            group: 1, file: 'beacon_kit/decorators/trace.py' },
+  { id: 'traced_tool_wrapper',            label: '@traced_tool wrapper',            group: 1, file: 'beacon_kit/decorators/tool.py' },
+  { id: 'setup_telemetry',               label: 'setup_telemetry()',               group: 2, file: 'beacon_kit/core/provider.py' },
+  { id: 'build_span_exporter',           label: 'build_span_exporter()',           group: 2, file: 'beacon_kit/core/exporters.py' },
+  { id: 'build_metric_exporter',         label: 'build_metric_exporter()',         group: 2, file: 'beacon_kit/core/exporters.py' },
+  { id: 'emit_compliance_event',         label: 'emit_compliance_event()',         group: 3, file: 'beacon_kit/compliance/events.py' },
+  { id: 'compute_chain_hash',            label: 'compute_chain_hash()',            group: 3, file: 'beacon_kit/compliance/chain.py' },
+  { id: 'sign_event',                    label: 'sign_event()',                    group: 3, file: 'beacon_kit/compliance/chain.py' },
+  { id: '_write_to_store',               label: '_write_to_store()',               group: 3, file: 'beacon_kit/compliance/events.py' },
+  { id: 'hash_inputs',                   label: 'hash_inputs()',                   group: 4, file: 'beacon_kit/utils/hashing.py' },
+  { id: 'summarize_output',              label: 'summarize_output()',              group: 4, file: 'beacon_kit/utils/hashing.py' },
+  { id: 'scrub_pii',                     label: 'scrub_pii()',                     group: 4, file: 'beacon_kit/utils/sanitizer.py' },
+  { id: 'set_baggage_on_current_context',label: 'set_baggage_on_current_context()',group: 5, file: 'beacon_kit/propagation/baggage.py' },
+  { id: 'get_current_trace_id',          label: 'get_current_trace_id()',          group: 5, file: 'beacon_kit/propagation/context.py' },
+  { id: 'get_current_span_id',           label: 'get_current_span_id()',           group: 5, file: 'beacon_kit/propagation/context.py' },
+  { id: 'TelemetryCircuitBreaker',       label: 'TelemetryCircuitBreaker',         group: 6, file: 'beacon_kit/circuit_breaker/breaker.py' },
+  { id: 'state_change',                  label: 'state_change()',                  group: 6, file: 'beacon_kit/circuit_breaker/breaker.py' },
+];
+
+const CG_LINKS = [
+  { source: 'query',                         target: 'set_baggage_on_current_context' },
+  { source: 'query',                         target: 'run_pricing_pipeline' },
+  { source: 'run_pricing_pipeline',          target: 'init_agent' },
+  { source: 'run_pricing_pipeline',          target: 'get_current_trace_id' },
+  { source: 'run_pricing_pipeline',          target: 'validate_query' },
+  { source: 'run_pricing_pipeline',          target: 'fetch_deal_data' },
+  { source: 'run_pricing_pipeline',          target: 'compute_pricing' },
+  { source: 'run_pricing_pipeline',          target: 'emit_compliance_record' },
+  { source: 'fetch_deal_data',               target: 'rwa_engine_lookup' },
+  { source: 'fetch_deal_data',               target: 'deal_db_lookup' },
+  { source: 'fetch_deal_data',               target: 'market_data_fetch' },
+  { source: 'emit_compliance_record',        target: 'hash_inputs' },
+  { source: 'emit_compliance_record',        target: 'emit_compliance_event' },
+  { source: 'emit_compliance_event',         target: 'compute_chain_hash' },
+  { source: 'emit_compliance_event',         target: 'sign_event' },
+  { source: 'emit_compliance_event',         target: '_write_to_store' },
+  { source: 'emit_compliance_event',         target: 'get_current_trace_id' },
+  { source: 'emit_compliance_event',         target: 'get_current_span_id' },
+  { source: 'setup_telemetry',               target: 'build_span_exporter' },
+  { source: 'setup_telemetry',               target: 'build_metric_exporter' },
+  { source: 'traced_tool_wrapper',           target: 'hash_inputs' },
+  { source: 'traced_tool_wrapper',           target: 'summarize_output' },
+  { source: 'traced_tool_wrapper',           target: 'scrub_pii' },
+  { source: 'TelemetryCircuitBreaker',       target: 'state_change' },
+  { source: 'rwa_engine_lookup',             target: 'TelemetryCircuitBreaker' },
+  { source: 'validate_query',                target: 'traced_node_wrapper' },
+  { source: 'fetch_deal_data',               target: 'traced_node_wrapper' },
+  { source: 'compute_pricing',               target: 'traced_node_wrapper' },
+  { source: 'emit_compliance_record',        target: 'traced_node_wrapper' },
+  { source: 'rwa_engine_lookup',             target: 'traced_tool_wrapper' },
+  { source: 'deal_db_lookup',                target: 'traced_tool_wrapper' },
+  { source: 'market_data_fetch',             target: 'traced_tool_wrapper' },
+  { source: 'TelemetryMiddleware_dispatch',  target: 'get_current_trace_id' },
+];
+
+function initCallGraph() {
+  const svgEl = document.getElementById('callgraph-svg');
+  const W = svgEl.getBoundingClientRect().width || 900;
+  const H = 600;
+
+  const svg = d3.select(svgEl).attr('viewBox', [0, 0, W, H]);
+
+  // Arrow marker
+  svg.append('defs').append('marker')
+    .attr('id', 'arr')
+    .attr('viewBox', '0 -4 8 8')
+    .attr('refX', 8)
+    .attr('refY', 0)
+    .attr('markerWidth', 6)
+    .attr('markerHeight', 6)
+    .attr('orient', 'auto')
+    .append('path')
+    .attr('d', 'M0,-4L8,0L0,4')
+    .attr('fill', '#4a5070');
+
+  const colorFn = d => GROUPS[d.group].color;
+
+  // Deep copy nodes and links so D3 mutations stay local to this call
+  const nodes = CG_NODES.map(n => Object.assign({}, n));
+  const links = CG_LINKS.map(l => Object.assign({}, l));
+
+  const simulation = d3.forceSimulation(nodes)
+    .force('link',    d3.forceLink(links).id(d => d.id).distance(140))
+    .force('charge',  d3.forceManyBody().strength(-380))
+    .force('center',  d3.forceCenter(W / 2, H / 2))
+    .force('collide', d3.forceCollide(58));
+
+  const container = svg.append('g');
+
+  svg.call(
+    d3.zoom().scaleExtent([0.15, 4])
+      .on('zoom', e => container.attr('transform', e.transform))
+  );
+
+  const linkSel = container.append('g').selectAll('line')
+    .data(links).join('line')
+    .attr('stroke', '#3a4060')
+    .attr('stroke-width', 1.5)
+    .attr('marker-end', 'url(#arr)');
+
+  const tip = d3.select('#d3tip');
+
+  const nodeSel = container.append('g').selectAll('g')
+    .data(nodes).join('g')
+    .call(
+      d3.drag()
+        .on('start', (e, d) => {
+          if (!e.active) simulation.alphaTarget(0.3).restart();
+          d.fx = d.x; d.fy = d.y;
+        })
+        .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
+        .on('end',  (e, d) => {
+          if (!e.active) simulation.alphaTarget(0);
+          d.fx = null; d.fy = null;
+        })
+    );
+
+  nodeSel.append('circle')
+    .attr('r', 10)
+    .attr('fill', colorFn)
+    .attr('stroke', '#0f1117')
+    .attr('stroke-width', 2)
+    .on('mouseover', (e, d) => {
+      tip.style('display', 'block')
+        .html('<strong>' + d.label + '</strong><br><code>' + d.file + '</code>');
+    })
+    .on('mousemove', e => {
+      tip.style('left', (e.clientX + 14) + 'px')
+         .style('top',  (e.clientY - 12) + 'px');
+    })
+    .on('mouseout', () => tip.style('display', 'none'));
+
+  nodeSel.append('text')
+    .text(d => d.label)
+    .attr('x', 14).attr('dy', '0.35em')
+    .attr('font-size', '11px')
+    .attr('fill', '#c0c8f0')
+    .attr('pointer-events', 'none');
+
+  simulation.on('tick', () => {
+    linkSel.each(function(d) {
+      const dx  = d.target.x - d.source.x;
+      const dy  = d.target.y - d.source.y;
+      const len = Math.sqrt(dx * dx + dy * dy) || 1;
+      const r   = 13;
+      d3.select(this)
+        .attr('x1', d.source.x + (dx / len) * r)
+        .attr('y1', d.source.y + (dy / len) * r)
+        .attr('x2', d.target.x - (dx / len) * r)
+        .attr('y2', d.target.y - (dy / len) * r);
+    });
+    nodeSel.attr('transform', d => 'translate(' + d.x + ',' + d.y + ')');
+  });
+
+  // Build legend
+  const legend = document.getElementById('cg-legend');
+  GROUPS.forEach(grp => {
+    const item = document.createElement('div');
+    item.className = 'cg-legend-item';
+    item.innerHTML =
+      '<span class="cg-dot" style="background:' + grp.color + '"></span>' +
+      grp.label;
+    legend.appendChild(item);
+  });
+}
+</script>
+</body>
+</html>

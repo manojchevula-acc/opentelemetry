@@ -7,7 +7,14 @@ from __future__ import annotations
 
 from opentelemetry import trace
 
-from beacon_kit import traced_node, get_current_trace_id
+from beacon_kit import (
+    traced_node,
+    traced_pipeline,
+    log_calls,
+    get_current_trace_id,
+    track_latency,
+    count_calls,
+)
 from beacon_kit.compliance import ComplianceEvent, emit_compliance_event
 from beacon_kit.utils.hashing import hash_inputs
 
@@ -25,7 +32,7 @@ def init_agent(config) -> None:
     _config = config
 
 
-@traced_node("validate_query")
+@traced_node("validate_query", state_attributes=["deal_id", "query_category"])
 async def validate_query(state: dict) -> dict:
     """Validate that required fields are present in the query state."""
     required = {"deal_id", "query_category"}
@@ -36,7 +43,7 @@ async def validate_query(state: dict) -> dict:
     return state
 
 
-@traced_node("fetch_deal_data")
+@traced_node("fetch_deal_data", state_attributes=["deal_id"])
 async def fetch_deal_data(state: dict) -> dict:
     """Fetch all required data for the deal in parallel."""
     deal_id = state["deal_id"]
@@ -53,7 +60,8 @@ async def fetch_deal_data(state: dict) -> dict:
     return state
 
 
-@traced_node("compute_pricing")
+@traced_node("compute_pricing", state_attributes=["query_category"])
+@track_latency("gernas.pricing.compute_latency_ms", unit="ms", attribute_keys=["query_category"])
 async def compute_pricing(state: dict) -> dict:
     """Compute the indicative price from fetched data."""
     rwa_usd = state["rwa"]["rwa_usd"]
@@ -73,7 +81,7 @@ async def compute_pricing(state: dict) -> dict:
     return state
 
 
-@traced_node("emit_compliance_record")
+@traced_node("emit_compliance_record", state_attributes=["deal_id", "query_category"])
 async def emit_compliance_record(state: dict) -> dict:
     """Emit a compliance event after pricing is computed — separate from OTEL pipeline."""
     if not _config or not _config.enable_compliance:
@@ -87,21 +95,44 @@ async def emit_compliance_record(state: dict) -> dict:
         payload_hash=hash_inputs(
             {"deal_id": state["deal_id"], "price": state.get("indicative_price")}
         ),
+        extra={
+            "deal_id": state["deal_id"],
+            "query_category": state["query_category"],
+            "asset_class": state.get("asset_class", "credit"),
+            "indicative_price_hash": hash_inputs({"price": state.get("indicative_price")}),
+        },
     )
     emit_compliance_event(event, _config)
     state["compliance_emitted"] = True
     return state
 
 
+@traced_pipeline("pricing_pipeline", attribute_keys=["deal_id", "query_category"])
+@log_calls()
+@track_latency("gernas.pricing.pipeline_latency_ms", unit="ms", attribute_keys=["query_category"])
+@count_calls("gernas.pricing.pipeline_runs_total", attribute_keys=["query_category"])
 async def run_pricing_pipeline(deal_id: str, query_category: str, config) -> dict:
     """Execute the full pricing pipeline — simulates a LangGraph graph run."""
     init_agent(config)
+    run_id = get_current_trace_id()
     state: dict = {
         "deal_id": deal_id,
         "query_category": query_category,
-        "run_id": get_current_trace_id(),
+        "run_id": run_id,
         "asset_class": "credit",
     }
+
+    # Emit compliance start event — bookends the completed event for audit trail
+    if config.enable_compliance:
+        start_event = ComplianceEvent(
+            event_type="pricing_query_started",
+            run_id=run_id,
+            actor="pricing_agent",
+            outcome="in_progress",
+            payload_hash=hash_inputs({"deal_id": deal_id, "query_category": query_category}),
+            extra={"deal_id": deal_id, "query_category": query_category},
+        )
+        emit_compliance_event(start_event, config)
 
     state = await validate_query(state)
     state = await fetch_deal_data(state)

@@ -8,14 +8,20 @@ from __future__ import annotations
 import asyncio
 import random
 
-from beacon_kit import traced_tool
+from beacon_kit import traced_tool, count_calls
 from beacon_kit.circuit_breaker import TelemetryCircuitBreaker
 
-# Circuit breaker: open after 3 consecutive failures, reset after 10 s
-rwa_breaker = TelemetryCircuitBreaker(name="rwa_engine", fail_max=3, reset_timeout=10)
+# Circuit breakers: one per external dependency, each with its own fault tolerance budget.
+# rwa_engine: strict (fail_max=3) — high-value risk data, fail fast
+# deal_db:    moderate (fail_max=5) — DB retries tolerated briefly
+# market_data: moderate (fail_max=5) — market feed momentary blips acceptable
+rwa_breaker    = TelemetryCircuitBreaker(name="rwa_engine",  fail_max=3, reset_timeout=10)
+db_breaker     = TelemetryCircuitBreaker(name="deal_db",     fail_max=5, reset_timeout=15)
+market_breaker = TelemetryCircuitBreaker(name="market_data", fail_max=5, reset_timeout=15)
 
 
 @traced_tool("rwa_engine_lookup")
+@count_calls("gernas.tool.calls_total", attributes={"tool": "rwa_engine_lookup"})
 @rwa_breaker
 async def rwa_engine_lookup(deal_id: str) -> dict:
     """Look up risk-weighted assets for a deal. Simulates an HTTP call."""
@@ -30,6 +36,8 @@ async def rwa_engine_lookup(deal_id: str) -> dict:
 
 
 @traced_tool("deal_db_lookup")
+@count_calls("gernas.tool.calls_total", attributes={"tool": "deal_db_lookup"})
+@db_breaker
 async def deal_db_lookup(deal_id: str) -> dict:
     """Fetch deal metadata from the Deal DB."""
     await asyncio.sleep(0.02)
@@ -43,6 +51,8 @@ async def deal_db_lookup(deal_id: str) -> dict:
 
 
 @traced_tool("market_data_fetch")
+@count_calls("gernas.tool.calls_total", attributes={"tool": "market_data_fetch"})
+@market_breaker
 async def market_data_fetch(asset_class: str) -> dict:
     """Fetch current market rates for a given asset class."""
     await asyncio.sleep(0.03)

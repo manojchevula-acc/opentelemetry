@@ -11,9 +11,10 @@ Import the pieces you need. Typical minimal setup:
 """
 from beacon_kit.core.config import TelemetryConfig
 from beacon_kit.core.provider import TelemetryHandle, setup_telemetry
-from beacon_kit.decorators.trace import traced, traced_node
+from beacon_kit.decorators.trace import traced, traced_node, traced_pipeline
 from beacon_kit.decorators.tool import traced_tool
 from beacon_kit.decorators.metrics import track_latency, count_calls
+from beacon_kit.decorators.log import log_calls
 from beacon_kit.propagation.context import (
     get_current_trace_id,
     get_current_span_id,
@@ -32,9 +33,11 @@ __all__ = [
     # Decorators
     "traced",
     "traced_node",
+    "traced_pipeline",
     "traced_tool",
     "track_latency",
     "count_calls",
+    "log_calls",
     # Propagation helpers
     "get_current_trace_id",
     "get_current_span_id",
